@@ -12,33 +12,31 @@ export default function LoginForm() {
 
   const { executeRecaptcha } = useGoogleReCaptcha();
 
-useEffect(() => {
-  if (typeof window !== "undefined") {
-    // Define el callback global siempre, no sólo cuando showRecaptchaV2 cambia
-    window.onRecaptchaV2Success = function (token) {
-      console.log("Token reCAPTCHA v2:", token);
-      handleLoginWithV2(token);
-    };
-  }
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      // Define el callback global siempre, no sólo cuando showRecaptchaV2 cambia
+      window.onRecaptchaV2Success = function (token) {
+        console.log("Token reCAPTCHA v2:", token);
+        handleLoginWithV2(token);
+      };
+    }
 
-  if (showRecaptchaV2) {
-    const script = document.createElement("script");
-    script.src = "https://www.google.com/recaptcha/api.js";
-    script.async = true;
-    script.defer = true;
-    document.body.appendChild(script);
+    if (showRecaptchaV2) {
+      const script = document.createElement("script");
+      script.src = "https://www.google.com/recaptcha/api.js";
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
 
-    return () => {
-      document.body.removeChild(script);
-    };
-  }
-}, [showRecaptchaV2]);
-
-
+      return () => {
+        document.body.removeChild(script);
+      };
+    }
+  }, [showRecaptchaV2]);
 
   const handleLoginWithV2 = async (v2Token) => {
     // Enviar token v2 al backend
-    console.log(v2Token)
+    console.log(v2Token);
     const res = await fetch("http://localhost:8000/api/validate-recaptcha-v2", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -50,10 +48,12 @@ useEffect(() => {
       setMensaje("No se pudo validar reCAPTCHA v2 ❌");
       return;
     }
+    setShowRecaptchaV2(false); // Ocultar el captcha después de la validación
 
     // Validación de usuario
     if (email === "admin@example.com" && password === "123456") {
       setMensaje("Inicio de sesión exitoso ✅");
+      // Ocultar el captcha
     } else {
       setMensaje("Credenciales incorrectas ❌");
     }
