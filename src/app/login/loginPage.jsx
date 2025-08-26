@@ -3,94 +3,89 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useGoogleReCaptcha } from "react-google-recaptcha-v3";
+import axios from "axios";
 
 export default function LoginForm() {
   const [showRecaptchaV2, setShowRecaptchaV2] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mensaje, setMensaje] = useState("");
 
   const { executeRecaptcha } = useGoogleReCaptcha();
+  // Mensaje desaparece automáticamente
+  useEffect(() => {
+    if (!mensaje) return;
+    const timer = setTimeout(() => setMensaje(""), 5000);
+    return () => clearTimeout(timer);
+  }, [mensaje]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      // Define el callback global siempre, no sólo cuando showRecaptchaV2 cambia
-      window.onRecaptchaV2Success = function (token) {
-        console.log("Token reCAPTCHA v2:", token);
-        handleLoginWithV2(token);
-      };
-    }
+    setMounted(true);
 
-    if (showRecaptchaV2) {
+    // Inject recaptcha v2 once
+    if (typeof window !== "undefined") {
+      window.onRecaptchaV2Success = handleLoginWithV2;
       const script = document.createElement("script");
       script.src = "https://www.google.com/recaptcha/api.js";
       script.async = true;
       script.defer = true;
       document.body.appendChild(script);
-
-      return () => {
-        document.body.removeChild(script);
-      };
+      return () => document.body.removeChild(script);
     }
-  }, [showRecaptchaV2]);
+  }, []);
 
   const handleLoginWithV2 = async (v2Token) => {
-    // Enviar token v2 al backend
-    console.log(v2Token);
-    const res = await fetch("http://localhost:8000/api/validate-recaptcha-v2", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: v2Token }),
-    });
-    const data = await res.json();
-    console.log(data);
-    if (!data.success) {
-      setMensaje("No se pudo validar reCAPTCHA v2 ❌");
-      return;
-    }
-    setShowRecaptchaV2(false); // Ocultar el captcha después de la validación
-
-    // Validación de usuario
-    if (email === "admin@example.com" && password === "123456") {
-      setMensaje("Inicio de sesión exitoso ✅");
-      // Ocultar el captcha
-    } else {
-      setMensaje("Credenciales incorrectas ❌");
+    try {
+      const { data } = await axios.post(
+        "http://localhost:8000/api/recaptcha/validate-recaptcha-v2",
+        { token: v2Token }
+      );
+      if (!data.success) {
+        setMensaje("No se pudo validar reCAPTCHA v2 ❌");
+        return;
+      }
+      setShowRecaptchaV2(false);
+      setMensaje("reCAPTCHA v2 validado ✅");
+      validateInputs();
+    } catch (err) {
+      console.error(err);
+      setMensaje("Error de conexión con el backend ❌");
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     if (!executeRecaptcha) {
       setMensaje("reCAPTCHA aún no cargado ❌");
       return;
     }
 
-    // Ejecutar reCAPTCHA v3
-    const token = await executeRecaptcha("login_form_submit");
+    try {
+      const token = await executeRecaptcha("login_form_submit");
+      const { data } = await axios.post(
+        "http://localhost:8000/api/recaptcha/validate-recaptcha",
+        { token }
+      );
 
-    // Enviar token al backend
-    const res = await fetch("http://localhost:8000/api/validate-recaptcha", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
-
-    const data = await res.json();
-    console.log("reCAPTCHA v3 response:", data);
-
-    if (!data.success) {
-      if (data.status === "recaptcha_v2_required") {
-        setShowRecaptchaV2(true); // activar v2
-        return;
-      } else {
-        setMensaje("No se pudo validar reCAPTCHA v3 ❌");
-        return;
+      if (!data.success) {
+        if (data.status === "recaptcha_v2_required") {
+          setShowRecaptchaV2(true);
+          return;
+        } else {
+          setMensaje("No se pudo validar reCAPTCHA v3 ❌");
+          return;
+        }
       }
-    }
 
-    // Validación de usuario
+      validateInputs();
+    } catch (err) {
+      console.error(err);
+      setMensaje("Error de conexión con el backend ❌");
+    }
+  };
+
+  const validateInputs = () => {
     if (email === "admin@example.com" && password === "123456") {
       setMensaje("Inicio de sesión exitoso ✅");
     } else {
@@ -105,7 +100,7 @@ export default function LoginForm() {
             src="/images/logo_contravel_white.png"
             alt="Logo"
             width={250}
-            height={0}
+            height={100}
             priority
           />
         </div>
@@ -115,33 +110,36 @@ export default function LoginForm() {
 
           <label className="login-label">Nombre de Usuario</label>
           <input
+            name="email"
             type="email"
             placeholder="Ingresa Usuario"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            autoComplete="new-username"
             required
             className="login-input"
           />
 
           <label className="login-label">Contraseña</label>
           <input
+            name="password"
             type="password"
             placeholder="Ingresa Contraseña"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
             required
             className="login-input"
           />
-          {showRecaptchaV2 && (
-            <div>
-              {/* reCAPTCHA v2 checkbox */}
-              <div
-                className="g-recaptcha"
-                data-sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_V2_KEY}
-                data-callback="onRecaptchaV2Success"
-              ></div>
-            </div>
+
+          {mounted && showRecaptchaV2 && (
+            <div
+              className="g-recaptcha"
+              data-sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_V2_KEY}
+              data-callback="onRecaptchaV2Success"
+            ></div>
           )}
+
           <button type="submit" className="login-button">
             Entrar
           </button>
@@ -152,14 +150,14 @@ export default function LoginForm() {
 
       <style jsx>{`
         .login-container {
-          height: 100dvh;
+          min-height: 100dvh; /* asegura que siempre ocupe al menos toda la pantalla */
           display: flex;
           flex-direction: column;
-          justify-content: center;
+          justify-content: center; /* centra verticalmente si hay espacio */
           align-items: center;
           background: linear-gradient(to bottom right, #0170ab 30%, #fff);
           padding: 20px;
-          overflow: hidden;
+          overflow-y: auto; /* scroll solo si el contenido es mayor a la pantalla */
         }
 
         .logo {
