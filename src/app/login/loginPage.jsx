@@ -4,15 +4,19 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useGoogleReCaptcha } from "react-google-recaptcha-v3";
 import axios from "axios";
+import { useRef } from "react";
 
 export default function LoginForm() {
   const [showRecaptchaV2, setShowRecaptchaV2] = useState(false);
+  const [recaptchaWidgetId, setRecaptchaWidgetId] = useState(null);
   const [mounted, setMounted] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mensaje, setMensaje] = useState("");
+  
 
   const { executeRecaptcha } = useGoogleReCaptcha();
+
   // Mensaje desaparece automáticamente
   useEffect(() => {
     if (!mensaje) return;
@@ -20,20 +24,35 @@ export default function LoginForm() {
     return () => clearTimeout(timer);
   }, [mensaje]);
 
+  // Inyecta script de reCAPTCHA V2
   useEffect(() => {
     setMounted(true);
 
-    // Inject recaptcha v2 once
-    if (typeof window !== "undefined") {
-      window.onRecaptchaV2Success = handleLoginWithV2;
+    if (typeof window !== "undefined" && !document.getElementById("recaptcha-v2-script")) {
       const script = document.createElement("script");
-      script.src = "https://www.google.com/recaptcha/api.js";
+      script.id = "recaptcha-v2-script";
+      script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
       script.async = true;
       script.defer = true;
       document.body.appendChild(script);
-      return () => document.body.removeChild(script);
     }
   }, []);
+
+  // Renderiza o resetea widget V2
+  useEffect(() => {
+    if (showRecaptchaV2 && typeof window !== "undefined" && window.grecaptcha) {
+      if (recaptchaWidgetId !== null) {
+        window.grecaptcha.reset(recaptchaWidgetId);
+      } else {
+        const widgetId = window.grecaptcha.render("recaptcha-v2", {
+          sitekey: process.env.NEXT_PUBLIC_RECAPTCHA_V2_KEY,
+          callback: (token) => handleLoginWithV2(token),
+        });
+        setRecaptchaWidgetId(widgetId);
+        
+      }
+    }
+  }, [showRecaptchaV2]);
 
   const handleLoginWithV2 = async (v2Token) => {
     try {
@@ -67,7 +86,7 @@ export default function LoginForm() {
         "http://localhost:8000/api/recaptcha/validate-recaptcha",
         { token }
       );
-
+      console.log(data);
       if (!data.success) {
         if (data.status === "recaptcha_v2_required") {
           setShowRecaptchaV2(true);
@@ -92,6 +111,7 @@ export default function LoginForm() {
       setMensaje("Credenciales incorrectas ❌");
     }
   };
+
   return (
     <>
       <div className="login-container">
@@ -110,8 +130,8 @@ export default function LoginForm() {
 
           <label className="login-label">Nombre de Usuario</label>
           <input
-            name="email"
-            type="email"
+            name="user"
+            type="text"
             placeholder="Ingresa Usuario"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -133,11 +153,7 @@ export default function LoginForm() {
           />
 
           {mounted && showRecaptchaV2 && (
-            <div
-              className="g-recaptcha"
-              data-sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_V2_KEY}
-              data-callback="onRecaptchaV2Success"
-            ></div>
+            <div id="recaptcha-v2" style={{ margin: "1em 0" }}></div>
           )}
 
           <button type="submit" className="login-button">
@@ -150,14 +166,14 @@ export default function LoginForm() {
 
       <style jsx>{`
         .login-container {
-          min-height: 100dvh; /* asegura que siempre ocupe al menos toda la pantalla */
+          min-height: 100dvh;
           display: flex;
           flex-direction: column;
-          justify-content: center; /* centra verticalmente si hay espacio */
+          justify-content: center;
           align-items: center;
           background: linear-gradient(to bottom right, #0170ab 30%, #fff);
           padding: 20px;
-          overflow-y: auto; /* scroll solo si el contenido es mayor a la pantalla */
+          overflow-y: auto;
         }
 
         .logo {
