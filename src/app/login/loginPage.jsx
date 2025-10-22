@@ -1,22 +1,35 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, use, useRef } from "react";
 import Image from "next/image";
 import { useGoogleReCaptcha } from "react-google-recaptcha-v3";
-import axios from "axios";
-import { useRef } from "react";
+import { useRouter } from "next/navigation";
+import {
+  validateRecaptchaV2,
+  validateRecaptchaV3,
+} from "@/lib/services/recaptchaService";
+import { loginAuth } from "@/lib/services/loginSevice";
+import { establecerToken } from "@/lib/auth";
+import { Eye, EyeOff } from "lucide-react";
+import usePageTransition from "@/lib/hooks/usePageTransition";
 
 export default function LoginForm() {
   const [showRecaptchaV2, setShowRecaptchaV2] = useState(false);
   const [recaptchaWidgetId, setRecaptchaWidgetId] = useState(null);
   const [mounted, setMounted] = useState(false);
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [mensaje, setMensaje] = useState("");
-  
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
   const { executeRecaptcha } = useGoogleReCaptcha();
 
+  // Refs para mantener valores actualizados
+  const usernameRef = useRef("");
+  const passwordRef = useRef("");
+  usePageTransition();
   // Mensaje desaparece automáticamente
   useEffect(() => {
     if (!mensaje) return;
@@ -28,7 +41,10 @@ export default function LoginForm() {
   useEffect(() => {
     setMounted(true);
 
-    if (typeof window !== "undefined" && !document.getElementById("recaptcha-v2-script")) {
+    if (
+      typeof window !== "undefined" &&
+      !document.getElementById("recaptcha-v2-script")
+    ) {
       const script = document.createElement("script");
       script.id = "recaptcha-v2-script";
       script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
@@ -49,31 +65,28 @@ export default function LoginForm() {
           callback: (token) => handleLoginWithV2(token),
         });
         setRecaptchaWidgetId(widgetId);
-        
       }
     }
   }, [showRecaptchaV2]);
 
   const handleLoginWithV2 = async (v2Token) => {
     try {
-      const { data } = await axios.post(
-        "http://localhost:8000/api/recaptcha/validate-recaptcha-v2",
-        { token: v2Token }
-      );
+      const data = await validateRecaptchaV2(v2Token);
       if (!data.success) {
         setMensaje("No se pudo validar reCAPTCHA v2 ❌");
         return;
       }
       setShowRecaptchaV2(false);
-      setMensaje("reCAPTCHA v2 validado ✅");
-      validateInputs();
+      validateInputs(usernameRef.current, passwordRef.current);
     } catch (err) {
-      console.error(err);
       setMensaje("Error de conexión con el backend ❌");
     }
   };
 
   const handleSubmit = async (e) => {
+    // Guardar valores actuales en refs
+    usernameRef.current = username;
+    passwordRef.current = password;
     e.preventDefault();
     if (!executeRecaptcha) {
       setMensaje("reCAPTCHA aún no cargado ❌");
@@ -82,11 +95,7 @@ export default function LoginForm() {
 
     try {
       const token = await executeRecaptcha("login_form_submit");
-      const { data } = await axios.post(
-        "http://localhost:8000/api/recaptcha/validate-recaptcha",
-        { token }
-      );
-      console.log(data);
+      const data = await validateRecaptchaV3(token);
       if (!data.success) {
         if (data.status === "recaptcha_v2_required") {
           setShowRecaptchaV2(true);
@@ -97,19 +106,41 @@ export default function LoginForm() {
         }
       }
 
-      validateInputs();
+      validateInputs(username, password);
     } catch (err) {
-      console.error(err);
       setMensaje("Error de conexión con el backend ❌");
     }
   };
 
-  const validateInputs = () => {
-    if (email === "admin@example.com" && password === "123456") {
-      setMensaje("Inicio de sesión exitoso ✅");
-    } else {
-      setMensaje("Credenciales incorrectas ❌");
+  const validateInputs = (user, pass) => {
+    if (!user.trim() && !pass.trim()) {
+      setMensaje("Porfavor ingresa usuario y contraseña ❌");
+      return;
+    } else if (!user.trim()) {
+      setMensaje("Porfavor ingresa usuario ❌");
+      return;
+    } else if (!pass.trim()) {
+      setMensaje("Porfavor ingresa contraseña ❌");
+      return;
     }
+    setShowPassword(false)
+    setLoading(true);
+    login(user, pass);
+  };
+
+  const login = async (user, password) => {
+    const response = await loginAuth(user, password);
+    if (response.success) {
+      establecerToken(response.data);
+      document.body.classList.add("fade-out");
+      setTimeout(() => {
+        router.push("/home");
+      }, 100);
+    } else {
+      setMensaje(response.message || "Error en autenticación ❌");
+    }
+    setLoading(false);
+    return;
   };
 
   return (
@@ -130,34 +161,54 @@ export default function LoginForm() {
 
           <label className="login-label">Nombre de Usuario</label>
           <input
-            name="user"
+            name="username"
             type="text"
             placeholder="Ingresa Usuario"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
             autoComplete="new-username"
             required
             className="login-input"
           />
 
           <label className="login-label">Contraseña</label>
-          <input
-            name="password"
-            type="password"
-            placeholder="Ingresa Contraseña"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-            required
-            className="login-input"
-          />
+          <div className="relative w-full password-container">
+            <input
+              name="password"
+              type={showPassword ? "text" : "password"}
+              placeholder="Ingresa Contraseña"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+              className="login-input login-input-password pr-10"
+            />
 
-          {mounted && showRecaptchaV2 && (
-            <div id="recaptcha-v2" style={{ margin: "1em 0" }}></div>
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="cursor-pointer absolute inset-y-0 right-0 flex items-center px-3 text-gray-500"
+            >
+              {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button>
+          </div>
+
+          {mounted && (
+            <div
+              id="recaptcha-v2"
+              style={{
+                display: showRecaptchaV2 ? "block" : "none",
+                margin: "1em 0",
+              }}
+            ></div>
           )}
 
-          <button type="submit" className="login-button">
-            Entrar
+          <button
+            type="submit"
+            className="login-button flex items-center justify-center"
+            disabled={loading}
+          >
+            {loading ? <span className="loader"></span> : "Ingresar"}
           </button>
 
           {mensaje && <p className="login-message">{mensaje}</p>}
@@ -165,6 +216,20 @@ export default function LoginForm() {
       </div>
 
       <style jsx>{`
+        .login-input-password {
+          margin-bottom: 0 !important;
+        }
+        .password-container{
+          margin-bottom: 1rem !important;
+        }
+        .loader {
+          border: 3px solid #f3f3f3;
+          border-top: 3px solid #3498db;
+          border-radius: 50%;
+          width: 18px;
+          height: 18px;
+          animation: spin 1s linear infinite;
+        }
         .login-container {
           min-height: 100dvh;
           display: flex;
@@ -262,6 +327,12 @@ export default function LoginForm() {
           margin-top: 1rem;
           font-size: 0.95rem;
           color: #555;
+        }
+
+        @keyframes spin {
+          to {
+            transform: rotate(360deg);
+          }
         }
 
         @media (max-width: 768px) {
